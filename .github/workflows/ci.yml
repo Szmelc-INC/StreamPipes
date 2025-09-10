@@ -1,0 +1,51 @@
+name: Build and Test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          pacman -Sy --noconfirm
+          pacman -S --noconfirm --needed base-devel fuse3
+
+      - name: Build modules
+        run: |
+          set -e
+          for dir in asciibuffer gpt shortlog syspeek; do
+            make -C "$dir"
+          done
+
+      - name: Smoke test devices
+        run: |
+          set -e
+          if [ -e /dev/fuse ]; then
+            modprobe fuse || true
+            mkdir -p /dev/szmelc
+            ./asciibuffer/asciibuffer /dev/szmelc/asciibuffer -f &
+            pid1=$!
+            ./shortlog/shortlog /dev/szmelc/shortlog -f &
+            pid2=$!
+            ./syspeek/syspeek /dev/szmelc/syspeek -f &
+            pid3=$!
+            ./gpt/gpt /dev/szmelc/gpt -f &
+            pid4=$!
+            sleep 2
+            echo "hello" > /dev/szmelc/shortlog || true
+            cat /dev/szmelc/syspeek || true
+            kill $pid1 $pid2 $pid3 $pid4 || true
+            fusermount3 -u /dev/szmelc/asciibuffer || true
+            fusermount3 -u /dev/szmelc/shortlog || true
+            fusermount3 -u /dev/szmelc/syspeek || true
+            fusermount3 -u /dev/szmelc/gpt || true
+          else
+            echo "FUSE kernel module not available; skipping runtime test"
+          fi
